@@ -19,13 +19,22 @@ const formatFileMessage = (file) => {
     ? new Date(file.fetchedAt).toLocaleTimeString()
     : "Unknown";
   return (
-    `📄 *File:* ${
-      file.file_name
-    }\n📂 *Type:* ${ext.toUpperCase()}\n🕒 *Fetched At:* ${time}\n` +
+    `📄 *File:* ${file.file_name}\n` +
+    `📂 *Type:* ${ext.toUpperCase()}\n` +
+    `🕒 *Fetched At:* ${time}\n\n` +
     (file.proxy_url
-      ? `🔗 [Download File](${file.proxy_url})`
+      ? `🔗 *Download Link:*\n\`${file.proxy_url}\`\n\n_Tap the link above to copy it_`
       : "⚠️ No download link available.")
   );
+};
+
+// Alternative format with inline keyboard
+const formatFileMessageWithButton = (file) => {
+  const ext = file.file_name.split(".").pop()?.toLowerCase() || "";
+  const time = file.fetchedAt
+    ? new Date(file.fetchedAt).toLocaleTimeString()
+    : "Unknown";
+  return `📄 *File:* ${file.file_name}\n📂 *Type:* ${ext.toUpperCase()}\n🕒 *Fetched At:* ${time}`;
 };
 
 // /start command
@@ -61,8 +70,9 @@ bot.on("message", async (msg) => {
   try {
     const file = await extractTeraBoxFile(text);
 
+    // Option 1: Send with copyable monospace text
     bot.editMessageText(
-      "✅ File extracted successfully:\n" + formatFileMessage(file),
+      "✅ File extracted successfully:\n\n" + formatFileMessage(file),
       {
         chat_id: chatId,
         message_id: loadingMsg.message_id,
@@ -71,7 +81,27 @@ bot.on("message", async (msg) => {
       }
     );
 
-    // Don't call sendFile - just edit the loading message
+    // Option 2: Send with inline keyboard button (uncomment to use this instead)
+    /*
+    bot.editMessageText(
+      "✅ File extracted successfully:\n\n" + formatFileMessageWithButton(file),
+      {
+        chat_id: chatId,
+        message_id: loadingMsg.message_id,
+        parse_mode: "Markdown",
+        disable_web_page_preview: true,
+        reply_markup: {
+          inline_keyboard: [[
+            {
+              text: "📋 Copy Download Link",
+              callback_data: `copy_${file.proxy_url}`
+            }
+          ]]
+        }
+      }
+    );
+    */
+
   } catch (err) {
     bot.editMessageText(
       `❌ Error: ${err.message || "Failed to fetch file details."}`,
@@ -84,10 +114,37 @@ bot.on("message", async (msg) => {
   }
 });
 
+// Handle inline keyboard callbacks for copy button
+bot.on("callback_query", async (callbackQuery) => {
+  const msg = callbackQuery.message;
+  const data = callbackQuery.data;
+
+  if (data.startsWith("copy_")) {
+    const url = data.replace("copy_", "");
+    
+    // Send the URL as a separate message that's easy to copy
+    await bot.sendMessage(
+      msg.chat.id,
+      `🔗 *Download Link:*\n\`${url}\`\n\n_Long press the link above to copy it_`,
+      {
+        parse_mode: "Markdown",
+        disable_web_page_preview: true,
+        reply_to_message_id: msg.message_id
+      }
+    );
+
+    // Answer the callback query
+    bot.answerCallbackQuery(callbackQuery.id, {
+      text: "Download link sent! Long press to copy.",
+      show_alert: false
+    });
+  }
+});
+
 // Send media if possible
 async function sendFile(chatId, file, fromCache = false, loadingMessageId = null) {
   const ext = file.file_name.split(".").pop()?.toLowerCase();
-  const messagePrefix = fromCache ? "✅ Loaded from cache:\n" : "✅ File extracted successfully:\n";
+  const messagePrefix = fromCache ? "✅ Loaded from cache:\n\n" : "✅ File extracted successfully:\n\n";
 
   // Delete loading message if provided
   if (loadingMessageId) {
