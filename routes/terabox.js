@@ -71,39 +71,41 @@ bot.on("message", async (msg) => {
 
   try {
     // Update loading message to show we're fetching the link
-    await bot.editMessageText(
-      "⏳ Extracting file details...\n🔗 Fetching download link...",
-      {
-        chat_id: chatId,
-        message_id: loadingMsg.message_id,
-        parse_mode: "Markdown",
-      }
-    );
+    try {
+      await bot.editMessageText(
+        "⏳ Extracting file details...\n🔗 Fetching download link...",
+        {
+          chat_id: chatId,
+          message_id: loadingMsg.message_id,
+          parse_mode: "Markdown",
+        }
+      );
+    } catch (editErr) {
+      // If edit fails, send a new message instead
+      console.log("Failed to edit loading message, sending new one");
+    }
 
     const file = await extractTeraBoxFile(text);
 
-    // Only show success when we actually have the proxy_url
-    if (file.proxy_url) {
-      await bot.editMessageText(
-        "✅ File extracted successfully:\n\n" + formatFileMessage(file),
-        {
-          chat_id: chatId,
-          message_id: loadingMsg.message_id,
-          parse_mode: "Markdown",
-          disable_web_page_preview: true,
-        }
-      );
-    } else {
-      await bot.editMessageText(
-        "⚠️ File details extracted but download link not available:\n\n" +
-          formatFileMessage(file),
-        {
-          chat_id: chatId,
-          message_id: loadingMsg.message_id,
-          parse_mode: "Markdown",
-          disable_web_page_preview: true,
-        }
-      );
+    // Try to edit the message, if it fails, send a new one
+    const successMessage = file.proxy_url
+      ? "✅ File extracted successfully:\n\n" + formatFileMessage(file)
+      : "⚠️ File details extracted but download link not available:\n\n" +
+        formatFileMessage(file);
+
+    try {
+      await bot.editMessageText(successMessage, {
+        chat_id: chatId,
+        message_id: loadingMsg.message_id,
+        parse_mode: "Markdown",
+        disable_web_page_preview: true,
+      });
+    } catch (editErr) {
+      // If edit fails, send a new message
+      await bot.sendMessage(chatId, successMessage, {
+        parse_mode: "Markdown",
+        disable_web_page_preview: true,
+      });
     }
 
     // Option 2: Send with inline keyboard button (uncomment to use this instead)
@@ -127,14 +129,23 @@ bot.on("message", async (msg) => {
     );
     */
   } catch (err) {
-    bot.editMessageText(
-      `❌ Error: ${err.message || "Failed to fetch file details."}`,
-      {
+    // Try to edit the error message, if it fails, send a new one
+    const errorMessage = `❌ Error: ${
+      err.message || "Failed to fetch file details."
+    }`;
+
+    try {
+      await bot.editMessageText(errorMessage, {
         chat_id: chatId,
         message_id: loadingMsg.message_id,
         parse_mode: "Markdown",
-      }
-    );
+      });
+    } catch (editErr) {
+      // If edit fails, send a new message
+      await bot.sendMessage(chatId, errorMessage, {
+        parse_mode: "Markdown",
+      });
+    }
   }
 });
 
