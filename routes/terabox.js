@@ -1,16 +1,13 @@
 const express = require("express");
-const axios = require("axios");
 const TelegramBot = require("node-telegram-bot-api");
+const { extractTeraBoxFile, sessionCache } = require("../utils/terabox");
 require("dotenv").config();
 
 const router = express.Router();
-
-const sessionCache = {};
-const workerUrl = process.env.WORKER_URL;
 const botToken = process.env.TELEGRAM_BOT_TOKEN;
 
-if (!workerUrl || !botToken) {
-  console.error("Missing WORKER_URL or TELEGRAM_BOT_TOKEN in .env");
+if (!botToken) {
+  console.error("Missing TELEGRAM_BOT_TOKEN in .env");
   process.exit(1);
 }
 
@@ -31,7 +28,7 @@ const formatFileMessage = (file) => {
   );
 };
 
-// Telegram command
+// /start command
 bot.onText(/\/start/, (msg) => {
   bot.sendMessage(
     msg.chat.id,
@@ -40,7 +37,7 @@ bot.onText(/\/start/, (msg) => {
   );
 });
 
-// Telegram message handler
+// Handle messages
 bot.on("message", async (msg) => {
   const chatId = msg.chat.id;
   const text = msg.text;
@@ -48,14 +45,8 @@ bot.on("message", async (msg) => {
   if (!text || text.startsWith("/") || !text.includes("terabox")) return;
 
   if (sessionCache[text]) {
-    bot.sendMessage(
-      chatId,
-      "✅ Loaded from cache:\n" + formatFileMessage(sessionCache[text]),
-      {
-        parse_mode: "Markdown",
-        disable_web_page_preview: true,
-      }
-    );
+    const file = sessionCache[text];
+    await sendFile(chatId, file, true);
     return;
   }
 
@@ -68,30 +59,10 @@ bot.on("message", async (msg) => {
   );
 
   try {
-    const response = await axios.post(
-      workerUrl,
-      { link: text },
-      {
-        headers: { "Content-Type": "application/json" },
-      }
-    );
-
-    if (response.status !== 200)
-      throw new Error("Failed to fetch file details");
-
-    const fileData = {
-      ...response.data,
-      sourceLink: text,
-      fetchedAt: new Date().toISOString(),
-    };
-
-    sessionCache[text] = fileData;
-    const history = sessionCache.history || [];
-    history.unshift(fileData);
-    sessionCache.history = history.slice(0, 10);
+    const file = await extractTeraBoxFile(text);
 
     bot.editMessageText(
-      "✅ File extracted successfully:\n" + formatFileMessage(fileData),
+      "✅ File extracted successfully:\n" + formatFileMessage(file),
       {
         chat_id: chatId,
         message_id: loadingMsg.message_id,
@@ -99,9 +70,11 @@ bot.on("message", async (msg) => {
         disable_web_page_preview: true,
       }
     );
-  } catch (error) {
+
+    // Don't call sendFile - just edit the loading message
+  } catch (err) {
     bot.editMessageText(
-      `❌ Error: ${error.message || "Failed to fetch file details."}`,
+      `❌ Error: ${err.message || "Failed to fetch file details."}`,
       {
         chat_id: chatId,
         message_id: loadingMsg.message_id,
@@ -111,43 +84,63 @@ bot.on("message", async (msg) => {
   }
 });
 
-// Optional REST API
+// Send media if possible
+async function sendFile(chatId, file, fromCache = false, loadingMessageId = null) {
+  const ext = file.file_name.split(".").pop()?.toLowerCase();
+  const messagePrefix = fromCache ? "✅ Loaded from cache:\n" : "✅ File extracted successfully:\n";
+
+  // Delete loading message if provided
+  if (loadingMessageId) {
+    try {
+      await bot.deleteMessage(chatId, loadingMessageId);
+    } catch (err) {
+      // Ignore if message already deleted
+    }
+  }
+
+  try {
+    if (ext?.match(/(jpg|jpeg|png|gif|webp)/)) {
+      await bot.sendPhoto(chatId, file.proxy_url, {
+        caption: messagePrefix + formatFileMessage(file),
+        parse_mode: "Markdown",
+      });
+    } else if (ext?.match(/(mp4|mov|mkv|webm)/)) {
+      await bot.sendVideo(chatId, file.proxy_url, {
+        caption: messagePrefix + formatFileMessage(file),
+        parse_mode: "Markdown",
+      });
+    } else {
+      await bot.sendMessage(
+        chatId,
+        messagePrefix + formatFileMessage(file),
+        {
+          parse_mode: "Markdown",
+          disable_web_page_preview: true,
+        }
+      );
+    }
+  } catch (err) {
+    await bot.sendMessage(chatId, messagePrefix + formatFileMessage(file), {
+      parse_mode: "Markdown",
+      disable_web_page_preview: true,
+    });
+  }
+}
+
+// REST API endpoint
 router.post("/", async (req, res) => {
   const { link } = req.body;
   if (!link) return res.status(400).json({ error: "Link is required" });
 
   try {
-    if (sessionCache[link]) return res.json(sessionCache[link]);
-
-    const response = await axios.post(
-      workerUrl,
-      { link },
-      {
-        headers: { "Content-Type": "application/json" },
-      }
-    );
-
-    if (response.status !== 200)
-      throw new Error("Failed to fetch file details");
-
-    const fileData = {
-      ...response.data,
-      sourceLink: link,
-      fetchedAt: new Date().toISOString(),
-    };
-
-    sessionCache[link] = fileData;
-    const history = sessionCache.history || [];
-    history.unshift(fileData);
-    sessionCache.history = history.slice(0, 10);
-
-    res.json(fileData);
+    const file = await extractTeraBoxFile(link);
+    res.json(file);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// Handle bot errors
+// Polling error handler
 bot.on("polling_error", (err) => {
   console.error("Polling error:", err.message);
 });
