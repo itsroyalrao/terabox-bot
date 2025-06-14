@@ -23,7 +23,7 @@ const formatFileMessage = (file) => {
     `📂 *Type:* ${ext.toUpperCase()}\n` +
     `🕒 *Fetched At:* ${time}\n\n` +
     (file.proxy_url
-      ? `🔗 *Download Link:*\n\`${file.proxy_url}\`\n\n_Tap the link above to copy it_`
+      ? `🔗 *Download Link:*\n\`${file.proxy_url}\`\n\n_Tap the link above to copy it and paste in your browser to start download_`
       : "⚠️ No download link available.")
   );
 };
@@ -107,27 +107,6 @@ bot.on("message", async (msg) => {
         disable_web_page_preview: true,
       });
     }
-
-    // Option 2: Send with inline keyboard button (uncomment to use this instead)
-    /*
-    bot.editMessageText(
-      "✅ File extracted successfully:\n\n" + formatFileMessageWithButton(file),
-      {
-        chat_id: chatId,
-        message_id: loadingMsg.message_id,
-        parse_mode: "Markdown",
-        disable_web_page_preview: true,
-        reply_markup: {
-          inline_keyboard: [[
-            {
-              text: "📋 Copy Download Link",
-              callback_data: `copy_${file.proxy_url}`
-            }
-          ]]
-        }
-      }
-    );
-    */
   } catch (err) {
     // Try to edit the error message, if it fails, send a new one
     const errorMessage = `❌ Error: ${
